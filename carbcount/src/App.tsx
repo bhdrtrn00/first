@@ -360,11 +360,26 @@ function ResultScreen({ entry, onSave, onDiscard }: {
 // ────────────────────────────────────────────────────────────
 // Home
 // ────────────────────────────────────────────────────────────
-function HomeScreen({ entries, onScan, onDashboard }: {
-  entries: FoodEntry[]; onScan: () => void; onDashboard: () => void
+function HomeScreen({ entries, onScan, onDashboard, onUpload }: {
+  entries: FoodEntry[]; onScan: () => void; onDashboard: () => void; onUpload: (b64: string, mime: string) => void
 }) {
   const totals = sumMacros(entries)
   const hasEntries = entries.length > 0
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const dataUrl = ev.target?.result as string
+      const [header, b64] = dataUrl.split(',')
+      const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg'
+      onUpload(b64, mime)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
 
   return (
     <div className="screen">
@@ -385,6 +400,11 @@ function HomeScreen({ entries, onScan, onDashboard }: {
         📷 SCAN MEAL
       </button>
 
+      <button className="btn btn-cyan btn-lg" onClick={() => fileRef.current?.click()} style={{ width: '100%', textAlign: 'center' }}>
+        📁 UPLOAD PHOTO
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
+
       {hasEntries && (
         <button className="btn btn-cyan" onClick={onDashboard} style={{ width: '100%', textAlign: 'center' }}>
           📊 VIEW DASHBOARD
@@ -394,7 +414,7 @@ function HomeScreen({ entries, onScan, onDashboard }: {
       <div className="px-box" style={{ padding: 12 }}>
         <div style={{ fontSize: 7, color: 'var(--gray)', lineHeight: 2.2 }}>
           MEALS TODAY: <span style={{ color: 'var(--green)' }}>{entries.length}</span><br />
-          CARBS: <span style={{ color: 'var(--cyan)' }}>{totals.carbs}g</span>  
+          CARBS: <span style={{ color: 'var(--cyan)' }}>{totals.carbs}g</span>
           PROTEIN: <span style={{ color: 'var(--green)' }}>{totals.protein}g</span>
         </div>
       </div>
@@ -487,7 +507,7 @@ export default function App() {
       )}
 
       {screen === 'home' && (
-        <HomeScreen entries={entries} onScan={() => setScreen('camera')} onDashboard={() => setScreen('dashboard')} />
+        <HomeScreen entries={entries} onScan={() => setScreen('camera')} onDashboard={() => setScreen('dashboard')} onUpload={handleCapture} />
       )}
       {screen === 'camera' && (
         <CameraScreen onCapture={handleCapture} onBack={() => setScreen('home')} />
