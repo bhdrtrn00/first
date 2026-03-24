@@ -9,7 +9,7 @@ export async function analyzeMealImage(
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-6',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     messages: [
       {
