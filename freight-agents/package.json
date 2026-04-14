@@ -1,0 +1,21 @@
+{
+  "name": "freight-agents",
+  "version": "1.0.0",
+  "description": "GlobalForward Freight Co. — 24-agent multi-agent system powered by Anthropic SDK",
+  "type": "module",
+  "main": "dist/demo.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file=.env dist/demo.js",
+    "dev": "node --env-file=.env --import tsx/esm src/demo.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.9.3"
+  }
+}
