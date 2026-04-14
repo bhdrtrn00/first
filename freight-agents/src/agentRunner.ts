@@ -8,6 +8,11 @@ import type {
   AgentId,
 } from './types.js';
 import { messageBus } from './messageBus.js';
+import {
+  getFreightEstimate,
+  formatEstimate,
+  resolveContainerType,
+} from './freightosClient.js';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -23,9 +28,13 @@ const MODEL = 'claude-sonnet-4-6';
  */
 export class AgentRunner {
   private client: Anthropic;
+  private freightosApiKey: string | undefined;
+  private freightosSandbox: boolean;
 
   constructor(apiKey: string) {
     this.client = new Anthropic({ apiKey });
+    this.freightosApiKey = process.env['FREIGHTOS_API_KEY'];
+    this.freightosSandbox = process.env['FREIGHTOS_SANDBOX'] === 'true';
   }
 
   async run(
@@ -153,9 +162,8 @@ export class AgentRunner {
   }
 
   /**
-   * Simulates tool execution. In production, each tool handler would call
-   * real external systems: TMS, ERP, customs APIs, tracking APIs, etc.
-   * The simulation returns plausible freight-domain responses.
+   * Executes a tool call. Live integrations (Freightos) are used when API keys
+   * are present; all other tools fall back to domain-realistic simulation.
    */
   private async executeSimulatedTool(
     agentId: AgentId,
@@ -164,12 +172,62 @@ export class AgentRunner {
   ): Promise<string> {
     console.log(`  [TOOL] ${agentId} -> ${toolName}(${JSON.stringify(input)})`);
 
-    // Shared simulation dispatcher — returns realistic freight data
+    // ── Live: Freightos Rate Estimator API ───────────────────────────────────
+    if (toolName === 'get_ocean_freight_rate' && this.freightosApiKey) {
+      try {
+        const resp = await getFreightEstimate(this.freightosApiKey, {
+          originName:      String(input['origin'] ?? ''),
+          destinationName: String(input['destination'] ?? ''),
+          quantity:        Number(input['quantity'] ?? 1),
+          containerType:   String(input['container_type'] ?? '40HC'),
+          mode: 'ocean',
+          useSandbox: this.freightosSandbox,
+        });
+        const result = formatEstimate(
+          { originName: String(input['origin']), destinationName: String(input['destination']),
+            quantity: Number(input['quantity'] ?? 1), containerType: String(input['container_type'] ?? '40HC'), mode: 'ocean' },
+          resp, 'OCEAN',
+        );
+        console.log(`  [LIVE]  Freightos OCEAN: $${result.priceMin}–$${result.priceMax} USD | ${result.transitDaysMin}–${result.transitDaysMax} days`);
+        return JSON.stringify(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`  [WARN]  Freightos live call failed (${msg}), using simulation`);
+      }
+    }
+
+    if (toolName === 'get_air_freight_rate' && this.freightosApiKey) {
+      try {
+        const weightKg = Number(input['weight_kg'] ?? 100);
+        const resp = await getFreightEstimate(this.freightosApiKey, {
+          originName:      String(input['origin'] ?? ''),
+          destinationName: String(input['destination'] ?? ''),
+          quantity:        1,
+          weightKg,
+          mode: 'air',
+          useSandbox: this.freightosSandbox,
+        });
+        const result = formatEstimate(
+          { originName: String(input['origin']), destinationName: String(input['destination']),
+            quantity: 1, weightKg, mode: 'air' },
+          resp, 'AIR',
+        );
+        console.log(`  [LIVE]  Freightos AIR: $${result.priceMin}–$${result.priceMax} USD | ${result.transitDaysMin}–${result.transitDaysMax} days`);
+        return JSON.stringify(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`  [WARN]  Freightos live call failed (${msg}), using simulation`);
+      }
+    }
+
+    // ── Simulation fallback ───────────────────────────────────────────────────
     const simulations: Record<string, (i: Record<string, unknown>) => string> = {
       get_air_freight_rate: (i) =>
-        JSON.stringify({ rate_usd_per_kg: 4.85, transit_days: 3, airline: 'Lufthansa Cargo', origin: i['origin'], destination: i['destination'], surcharges: { fuel: 0.65, security: 0.10 } }),
-      get_ocean_freight_rate: (i) =>
-        JSON.stringify({ rate_usd_per_teu: 2400, transit_days: 28, carrier: 'Maersk', service: 'AE-1', origin: i['origin'], destination: i['destination'], surcharges: { baf: 250, thc_origin: 180, thc_dest: 210 } }),
+        JSON.stringify({ rate_usd_per_kg: 4.85, transit_days: 3, airline: 'Lufthansa Cargo', origin: i['origin'], destination: i['destination'], surcharges: { fuel: 0.65, security: 0.10 }, _source: 'simulation' }),
+      get_ocean_freight_rate: (i) => {
+        const ct = resolveContainerType(String(i['container_type'] ?? '40HC'));
+        return JSON.stringify({ rate_usd_per_container: 2400, container_type: ct, transit_days: 28, carrier: 'Maersk', service: 'AE-1', origin: i['origin'], destination: i['destination'], surcharges: { baf: 250, thc_origin: 180, thc_dest: 210 }, _source: 'simulation' });
+      },
       get_ground_transport_rate: (i) =>
         JSON.stringify({ rate_usd: 850, transit_days: 2, carrier: 'XPO Logistics', mode: i['mode'] ?? 'FTL', fuel_surcharge_pct: 18 }),
       track_shipment: (i) =>
